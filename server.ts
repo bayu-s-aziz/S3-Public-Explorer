@@ -11,14 +11,6 @@ try {
   console.log('No existing process found on port 3000 or failed to kill');
 }
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
-
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import fs from 'fs/promises';
@@ -153,31 +145,42 @@ async function startServer() {
 
   // --- ASSETS & SPA FALLBACK ---
 
-  app.listen(PORT, '0.0.0.0', async () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-    
-    if (process.env.NODE_ENV !== 'production') {
-      try {
-        const vite = await createViteServer({
-          server: { 
-            middlewareMode: true,
-            hmr: false 
-          },
-          appType: 'spa',
-        });
-        app.use(vite.middlewares);
-        console.log('Vite middleware integrated');
-      } catch (e) {
-        console.error('Failed to initialize Vite middleware:', e);
-      }
-    } else {
-      const distPath = getDistPath();
-      console.log(`Serving static files from: ${distPath}`);
-      app.use(express.static(distPath));
-      app.get('*', (req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      console.log('Initializing Vite middleware...');
+      // Temporarily remove PORT so Vite doesn't try to bind its HMR or anything to it
+      const systemPort = process.env.PORT;
+      delete process.env.PORT;
+      process.env.PORT = '24678'; // some random port for vite to use if it wants
+
+      const vite = await createViteServer({
+        server: { 
+          middlewareMode: true,
+          hmr: false,
+          port: 24678, // force it to stay away from 3000
+          watch: null // disable watcher
+        },
+        appType: 'spa',
       });
+      
+      process.env.PORT = systemPort; // restore PORT
+
+      app.use(vite.middlewares);
+      console.log('Vite middleware integrated');
+    } catch (e) {
+      console.error('Failed to initialize Vite middleware:', e);
     }
+  } else {
+    const distPath = getDistPath();
+    console.log(`Serving static files from: ${distPath}`);
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
