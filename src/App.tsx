@@ -184,12 +184,22 @@ export default function App() {
     const fetchLabels = async () => {
       try {
         const response = await fetch('/api/labels');
-        if (response.ok) {
-          const data = await response.json();
-          setFolderLabels(data);
+        const contentType = response.headers.get('content-type');
+        
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status} ${response.statusText}`);
         }
-      } catch (e) {
-        console.error('Failed to load folder labels', e);
+        
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await response.text();
+          console.error('Expected JSON but got:', text.slice(0, 100));
+          throw new Error('Server returned HTML instead of JSON. This suggests a routing configuration issue.');
+        }
+
+        const data = await response.json();
+        setFolderLabels(data);
+      } catch (e: any) {
+        console.error('Failed to load folder labels:', e);
       }
     };
     fetchLabels();
@@ -222,10 +232,16 @@ export default function App() {
     setError(null);
     try {
       const response = await fetch(`/api/s3?prefix=${encodeURIComponent(prefix)}`);
+      const contentType = response.headers.get('content-type');
       const xmlText = await response.text();
       
       if (!response.ok) {
         throw new Error(`Failed to fetch S3 data: ${response.status} ${response.statusText}\n${xmlText.slice(0, 100)}`);
+      }
+      
+      if (!contentType || (!contentType.includes('text/xml') && !contentType.includes('application/xml'))) {
+        console.error('Expected XML but got:', xmlText.slice(0, 100));
+        throw new Error('Server returned HTML instead of XML. This usually means the API route was not found and fell back to the main page.');
       }
       
       const parser = new DOMParser();
