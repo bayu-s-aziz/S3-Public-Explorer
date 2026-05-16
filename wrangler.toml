@@ -1,3 +1,4 @@
+name = "s3-explorer-pages"
 pages_build_output_dir = "dist"
 compatibility_date = "2024-05-16"
 
