@@ -1,0 +1,8 @@
+name = "s3-explorer-pages"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-05-16"
+
+# Konfigurasi KV namespace untuk menyimpan label permanen di Cloudflare
+[[kv_namespaces]]
+binding = "FOLDER_LABELS_KV"
+id = "YOUR_KV_NAMESPACE_ID"

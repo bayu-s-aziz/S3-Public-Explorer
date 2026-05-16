@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Folder, FileText, ChevronRight, Home, Download, AlertCircle, RefreshCw, HardDrive, X } from 'lucide-react';
+import { Folder, FileText, ChevronRight, Home, Download, AlertCircle, RefreshCw, HardDrive, X, Tag, Check } from 'lucide-react';
 
 interface S3File {
   key: string;
@@ -96,8 +96,81 @@ const PreviewContent = ({ file, bucketEndpointUrl }: { file: S3File, bucketEndpo
   );
 };
 
+const FolderLabel = ({ prefix, initialLabel, onSave }: { prefix: string, initialLabel: string, onSave: (prefix: string, label: string) => void }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [value, setValue] = useState(initialLabel);
+
+  // Update local state when initialLabel changes globally
+  useEffect(() => {
+    setValue(initialLabel);
+  }, [initialLabel]);
+
+  const handleSave = (e: React.MouseEvent | React.FormEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onSave(prefix, value);
+    setIsEditing(false);
+  };
+
+  if (isEditing) {
+    return (
+      <form 
+        onSubmit={handleSave} 
+        className="flex items-center gap-1 ml-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          autoFocus
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="text-xs border border-blue-300 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-blue-100"
+          placeholder="Folder label..."
+        />
+        <button type="submit" className="text-blue-600 hover:bg-blue-50 p-1 rounded">
+          <Check className="w-3.5 h-3.5" />
+        </button>
+        <button 
+          type="button" 
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsEditing(false);
+            setValue(initialLabel);
+          }}
+          className="text-gray-400 hover:bg-gray-100 p-1 rounded"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <div 
+      className="flex items-center gap-1 text-xs ml-2 flex-1 min-w-0"
+      onClick={(e) => {
+        e.stopPropagation();
+        setIsEditing(true);
+      }}
+    >
+      {initialLabel ? (
+        <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 hover:bg-blue-100 cursor-pointer font-medium max-w-[200px] truncate" title={initialLabel}>
+          <Tag className="w-3 h-3 shrink-0" />
+          <span className="truncate">{initialLabel}</span>
+        </span>
+      ) : (
+        <button className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity flex items-center gap-1.5 hover:bg-gray-100 px-2 py-1 rounded">
+          <Tag className="w-3.5 h-3.5" />
+          Add Label
+        </button>
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   const [currentPrefix, setCurrentPrefix] = useState<string>('');
+  const [folderLabels, setFolderLabels] = useState<Record<string, string>>({});
   const [folders, setFolders] = useState<S3Folder[]>([]);
   const [files, setFiles] = useState<S3File[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -105,6 +178,44 @@ export default function App() {
   const [previewFile, setPreviewFile] = useState<S3File | null>(null);
 
   const bucketEndpointUrl = 'https://aws3.unigal.ac.id/ftgenk-storage/';
+
+  // Load labels from server on mount
+  useEffect(() => {
+    const fetchLabels = async () => {
+      try {
+        const response = await fetch('/api/labels');
+        if (response.ok) {
+          const data = await response.json();
+          setFolderLabels(data);
+        }
+      } catch (e) {
+        console.error('Failed to load folder labels', e);
+      }
+    };
+    fetchLabels();
+  }, []);
+
+  const handleSetLabel = async (prefix: string, label: string) => {
+    const updated = { ...folderLabels };
+    if (!label.trim()) {
+      delete updated[prefix];
+    } else {
+      updated[prefix] = label.trim();
+    }
+    setFolderLabels(updated);
+
+    try {
+      await fetch('/api/labels', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prefix, label }),
+      });
+    } catch (e) {
+      console.error('Failed to save folder label', e);
+    }
+  };
 
   const fetchContents = async (prefix: string) => {
     setLoading(true);
@@ -305,9 +416,14 @@ export default function App() {
                 >
                   <div className="col-span-12 md:col-span-7 flex items-center gap-3 min-w-0">
                     <Folder className="w-5 h-5 text-blue-500 fill-blue-500/20 shrink-0" />
-                    <span className="font-medium text-gray-700 group-hover:text-blue-600 transition-colors truncate">
+                    <span className="font-medium text-gray-700 group-hover:text-blue-600 transition-colors truncate shrink-0">
                       {folder.name}
                     </span>
+                    <FolderLabel 
+                      prefix={folder.prefix} 
+                      initialLabel={folderLabels[folder.prefix] || ''} 
+                      onSave={handleSetLabel} 
+                    />
                   </div>
                   <div className="hidden md:block col-span-3 text-sm text-gray-400">
                     --
