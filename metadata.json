@@ -1,0 +1,8 @@
+{
+  "name": "S3 Public Explorer",
+  "description": "A frontend file explorer to browse a public S3 bucket using its XML ListBucketResult endpoint.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
