@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { Folder, FileText, ChevronRight, Home, Download, AlertCircle, RefreshCw, HardDrive, X, Tag, Check } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Folder, FileText, ChevronRight, Home, Download, AlertCircle, RefreshCw, HardDrive, X, Tag, Check, Filter } from 'lucide-react';
 
 interface S3File {
   key: string;
@@ -177,6 +177,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<S3File | null>(null);
 
+  const [filterLabelText, setFilterLabelText] = useState('');
+  const [sortByLabel, setSortByLabel] = useState(false);
+  
+  const previousPrefixRef = useRef<string | null>(null);
+  const [returnToPrefix, setReturnToPrefix] = useState<string | null>(null);
+
   const bucketEndpointUrl = 'https://aws3.unigal.ac.id/ftgenk-storage/';
 
   // Load labels from localStorage on mount
@@ -284,10 +290,59 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (previousPrefixRef.current !== null && previousPrefixRef.current !== currentPrefix) {
+      if (previousPrefixRef.current.startsWith(currentPrefix)) {
+        const relPath = previousPrefixRef.current.substring(currentPrefix.length);
+        const childFolderName = relPath.split('/')[0];
+        const childPrefix = currentPrefix + childFolderName + '/';
+        setReturnToPrefix(childPrefix);
+      } else {
+        setReturnToPrefix(null);
+      }
+    } else {
+      setReturnToPrefix(null);
+    }
+    previousPrefixRef.current = currentPrefix;
     fetchContents(currentPrefix);
   }, [currentPrefix]);
 
+  useEffect(() => {
+    if (!loading && returnToPrefix) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`folder-${returnToPrefix}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.style.backgroundColor = '#eff6ff'; // blue-50 equivalent
+          el.style.transition = 'background-color 2s ease-out';
+          setTimeout(() => {
+            el.style.backgroundColor = '';
+          }, 2000);
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, returnToPrefix]);
+
   const breadcrumbParts = currentPrefix.split('/').filter(Boolean);
+
+  let displayFolders = folders;
+  if (filterLabelText) {
+    const lowerFilter = filterLabelText.toLowerCase();
+    displayFolders = displayFolders.filter(f => {
+      const lbl = folderLabels[f.prefix] || '';
+      return lbl.toLowerCase().includes(lowerFilter);
+    });
+  }
+
+  if (sortByLabel) {
+    displayFolders = [...displayFolders].sort((a, b) => {
+      const lblA = folderLabels[a.prefix]?.toLowerCase() || '';
+      const lblB = folderLabels[b.prefix]?.toLowerCase() || '';
+      if (lblA && !lblB) return -1;
+      if (!lblA && lblB) return 1;
+      return lblA.localeCompare(lblB);
+    });
+  }
 
   const handleBreadcrumbClick = (index: number) => {
     if (index === -1) {
@@ -371,6 +426,28 @@ export default function App() {
           </div>
         )}
 
+        {/* Filter & Sort Controls */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-64">
+               <Filter className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+               <input 
+                  type="text" 
+                  placeholder="Filter by label..." 
+                  value={filterLabelText}
+                  onChange={(e) => setFilterLabelText(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+               />
+            </div>
+            <button 
+              onClick={() => setSortByLabel(!sortByLabel)}
+              className={`px-3 py-2 text-sm font-medium border rounded-lg flex items-center gap-2 transition-colors shrink-0 ${sortByLabel ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            >
+              Sort by Label
+            </button>
+          </div>
+        </div>
+
         {/* Content Table Container */}
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
           {/* Table Header */}
@@ -392,21 +469,24 @@ export default function App() {
             <div className="divide-y divide-gray-100">
               
               {/* Empty State */}
-              {!loading && folders.length === 0 && files.length === 0 && !error && (
+              {!loading && displayFolders.length === 0 && files.length === 0 && !error && (
                  <div className="px-6 py-16 flex flex-col items-center justify-center text-center">
                     <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mb-4">
                       <HardDrive className="w-8 h-8 text-gray-300" />
                     </div>
-                    <h3 className="text-lg font-medium text-gray-900 mb-1">Directory is empty</h3>
+                    <h3 className="text-lg font-medium text-gray-900 mb-1">
+                      {folders.length > 0 ? "No results found" : "Directory is empty"}
+                    </h3>
                     <p className="text-gray-500 text-sm max-w-sm">
-                      There are no files or folders located at this path.
+                      {folders.length > 0 ? "Try adjusting your filter." : "There are no files or folders located at this path."}
                     </p>
                  </div>
               )}
 
               {/* Folders */}
-              {folders.map((folder, index) => (
+              {displayFolders.map((folder, index) => (
                 <div 
+                  id={`folder-${folder.prefix}`}
                   key={`folder-${index}`}
                   onClick={() => setCurrentPrefix(folder.prefix)}
                   className="grid grid-cols-12 gap-4 px-6 py-3.5 hover:bg-gray-50 cursor-pointer transition-colors items-center group"
