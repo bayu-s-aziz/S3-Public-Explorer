@@ -179,30 +179,16 @@ export default function App() {
 
   const bucketEndpointUrl = 'https://aws3.unigal.ac.id/ftgenk-storage/';
 
-  // Load labels from server on mount
+  // Load labels from localStorage on mount
   useEffect(() => {
-    const fetchLabels = async () => {
-      try {
-        const response = await fetch('/api/labels');
-        const contentType = response.headers.get('content-type');
-        
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status} ${response.statusText}`);
-        }
-        
-        if (!contentType || !contentType.includes('application/json')) {
-          const text = await response.text();
-          console.error('Expected JSON but got:', text.slice(0, 100));
-          throw new Error('Server returned HTML instead of JSON. This suggests a routing configuration issue.');
-        }
-
-        const data = await response.json();
-        setFolderLabels(data);
-      } catch (e: any) {
-        console.error('Failed to load folder labels:', e);
+    try {
+      const stored = localStorage.getItem('s3_explorer_labels');
+      if (stored) {
+        setFolderLabels(JSON.parse(stored));
       }
-    };
-    fetchLabels();
+    } catch (e) {
+      console.error('Failed to load labels from localStorage', e);
+    }
   }, []);
 
   const handleSetLabel = async (prefix: string, label: string) => {
@@ -215,15 +201,9 @@ export default function App() {
     setFolderLabels(updated);
 
     try {
-      await fetch('/api/labels', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ prefix, label }),
-      });
+      localStorage.setItem('s3_explorer_labels', JSON.stringify(updated));
     } catch (e) {
-      console.error('Failed to save folder label', e);
+      console.error('Failed to save label to localStorage', e);
     }
   };
 
@@ -231,7 +211,8 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/s3?prefix=${encodeURIComponent(prefix)}`);
+      const url = `https://aws3.unigal.ac.id/ftgenk-storage/?list-type=2&prefix=${encodeURIComponent(prefix)}&delimiter=/`;
+      const response = await fetch(url);
       const contentType = response.headers.get('content-type');
       const xmlText = await response.text();
       
