@@ -1,8 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import fs from 'fs/promises';
 
 async function startServer() {
   const app = express();
@@ -10,28 +9,30 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Initialize SQLite Database
-  const db = await open({
-    filename: './database.sqlite',
-    driver: sqlite3.Database
-  });
+  // Initialize JSON Database
+  const labelsFile = process.env.NODE_ENV === 'production' ? '/tmp/labels.json' : './labels.json';
+  let folderLabels: Record<string, string> = {};
+  
+  try {
+    const data = await fs.readFile(labelsFile, 'utf-8');
+    folderLabels = JSON.parse(data);
+  } catch (error) {
+    // If file doesn't exist, start with empty
+    folderLabels = {};
+  }
 
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS folder_labels (
-      prefix TEXT PRIMARY KEY,
-      label TEXT NOT NULL
-    )
-  `);
+  async function saveLabels() {
+    try {
+      await fs.writeFile(labelsFile, JSON.stringify(folderLabels, null, 2));
+    } catch (error) {
+      console.error('Error saving labels to file:', error);
+    }
+  }
 
   // Labels API
   app.get('/api/labels', async (req, res) => {
     try {
-      const rows = await db.all('SELECT prefix, label FROM folder_labels');
-      const labelsDict: Record<string, string> = {};
-      rows.forEach(row => {
-        labelsDict[row.prefix] = row.label;
-      });
-      res.json(labelsDict);
+      res.json(folderLabels);
     } catch (error: any) {
       console.error('Error fetching labels:', error);
       res.status(500).json({ error: 'Failed to fetch labels' });
@@ -46,14 +47,12 @@ async function startServer() {
       }
       
       if (!label.trim()) {
-        await db.run('DELETE FROM folder_labels WHERE prefix = ?', prefix);
+        delete folderLabels[prefix];
       } else {
-        await db.run(
-          'INSERT INTO folder_labels (prefix, label) VALUES (?, ?) ON CONFLICT(prefix) DO UPDATE SET label = excluded.label',
-          prefix,
-          label.trim()
-        );
+        folderLabels[prefix] = label.trim();
       }
+      
+      await saveLabels();
       res.json({ success: true });
     } catch (error: any) {
       console.error('Error saving label:', error);
