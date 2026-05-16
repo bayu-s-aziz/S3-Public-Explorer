@@ -1,19 +1,58 @@
 import express from 'express';
+import { execSync } from 'child_process';
+console.log('--- SERVER.TS FILE LOADED ---');
+
+// Try to kill anything on port 3000 before we start
+try {
+  console.log('Attempting to clear port 3000...');
+  execSync('npx kill-port 3000');
+  console.log('Port 3000 cleared');
+} catch (e) {
+  console.log('No existing process found on port 3000 or failed to kill');
+}
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import fs from 'fs/promises';
+import axios from 'axios';
+import { fileURLToPath } from 'url';
+
+// Simple way that works for both tsx (root) and bundled dist/server.cjs (dist)
+const getDistPath = () => {
+  if (process.env.NODE_ENV === 'production') {
+    // When running from dist/server.cjs, the dist folder is the same folder
+    // But usually process.cwd() is the root.
+    return path.resolve(process.cwd(), 'dist');
+  }
+  return path.resolve(process.cwd(), 'dist'); // Same for dev if we want to serve static
+};
 
 async function startServer() {
   const app = express();
+  // FORCE Port 3000 as required by the environment
   const PORT = 3000;
+
+  console.log('--- SERVER INITIALIZING ---');
+  console.log('Node version:', process.version);
+  console.log('NODE_ENV:', process.env.NODE_ENV);
+  console.log('CWD:', process.cwd());
+  console.log('Target PORT:', PORT);
+
+  app.use(express.json());
 
   // Logging middleware
   app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
     next();
   });
-
-  app.use(express.json());
 
   // Initialize JSON Database
   const labelsFile = process.env.NODE_ENV === 'production' ? '/tmp/labels.json' : './labels.json';
@@ -38,20 +77,28 @@ async function startServer() {
     }
   }
 
-  // API Routes
-  const apiRouter = express.Router();
-
-  // Labels API
-  apiRouter.get('/labels', async (req, res) => {
-    try {
-      res.json(folderLabels);
-    } catch (error: any) {
-      console.error('Error fetching labels:', error);
-      res.status(500).json({ error: 'Failed to fetch labels' });
-    }
+  // --- API ROUTES ---
+  
+  app.get('/api/health', (req, res) => {
+    res.json({ 
+      status: 'ok', 
+      time: new Date().toISOString(),
+      env: process.env.NODE_ENV,
+      node: process.version
+    });
   });
 
-  apiRouter.post('/labels', async (req, res) => {
+  app.get('/ping', (req, res) => {
+    res.send('pong');
+  });
+
+  app.get('/api/labels', (req, res) => {
+    console.log('Handling GET /api/labels');
+    res.json(folderLabels);
+  });
+
+  app.post('/api/labels', async (req, res) => {
+    console.log('Handling POST /api/labels');
     try {
       const { prefix, label } = req.body;
       if (typeof prefix !== 'string' || typeof label !== 'string') {
@@ -72,59 +119,68 @@ async function startServer() {
     }
   });
 
-  // Proxy API for S3
-  apiRouter.get('/s3', async (req, res) => {
+  app.get('/api/s3', async (req, res) => {
+    const prefix = req.query.prefix || '';
+    console.log(`Handling GET /api/s3 for prefix: "${prefix}"`);
+    
     try {
-      const prefix = req.query.prefix || '';
-      console.log(`Proxying S3 request for prefix: "${prefix}"`);
-      
       const targetUrl = `https://aws3.unigal.ac.id/ftgenk-storage/?list-type=2&prefix=${encodeURIComponent(prefix as string)}&delimiter=/`;
       
-      const response = await fetch(targetUrl);
-      const data = await response.text();
-      
-      if (!response.ok) {
-        console.error(`S3 target returned error: ${response.status}`);
-        return res.status(response.status).send(data);
-      }
+      const response = await axios.get(targetUrl, {
+        responseType: 'text',
+        headers: {
+          'Accept': 'application/xml'
+        }
+      });
       
       res.header('Content-Type', 'text/xml');
-      res.send(data);
+      res.send(response.data);
     } catch (error: any) {
-      console.error('Error fetching S3:', error);
-      res.status(500).json({ error: error.message || 'Failed to fetch directory contents' });
+      console.error('Error fetching S3 via axios:', error.message);
+      if (error.response) {
+        res.status(error.response.status).send(error.response.data);
+      } else {
+        res.status(500).json({ error: 'Failed to fetch directory contents' });
+      }
     }
   });
 
-  // Catch-all for API to prevent HTML fallback for missing API routes
-  apiRouter.all('*', (req, res) => {
+  // Catch-all for API
+  app.all('/api/*', (req, res) => {
     console.log(`Unmatched API route: ${req.url}`);
     res.status(404).json({ error: 'API route not found' });
   });
 
-  app.use('/api', apiRouter);
+  // --- ASSETS & SPA FALLBACK ---
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('Running in development mode with Vite middleware');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    console.log('Running in production mode, serving dist files');
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    // Support SPA routing in production
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, '0.0.0.0', async () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    
+    if (process.env.NODE_ENV !== 'production') {
+      try {
+        const vite = await createViteServer({
+          server: { 
+            middlewareMode: true,
+            hmr: false 
+          },
+          appType: 'spa',
+        });
+        app.use(vite.middlewares);
+        console.log('Vite middleware integrated');
+      } catch (e) {
+        console.error('Failed to initialize Vite middleware:', e);
+      }
+    } else {
+      const distPath = getDistPath();
+      console.log(`Serving static files from: ${distPath}`);
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error('FAILED TO START SERVER:', err);
+});
