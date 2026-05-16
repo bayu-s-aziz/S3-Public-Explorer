@@ -1,6 +1,9 @@
 name = "s3-explorer-pages"
-pages_build_output_dir = "dist"
 compatibility_date = "2024-05-16"
+pages_build_output_dir = "dist"
+
+[[assets]]
+directory = "./dist"
 
 # Konfigurasi KV namespace untuk menyimpan label permanen di Cloudflare
 [[kv_namespaces]]
